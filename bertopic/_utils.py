@@ -50,6 +50,19 @@ def check_embeddings_shape(embeddings, docs):
                 raise ValueError("Make sure that the embeddings are a numpy array with shape: "
                                  "(len(docs), vector_dim) where vector_dim is the dimensionality "
                                  "of the vector embeddings. ")
+            
+
+def check_count_matrix_shape(count_matrix, embeddings):
+    """ Check if the count matrix has the correct shape """
+    if count_matrix is not None:
+        if not any([isinstance(count_matrix, np.ndarray), isinstance(count_matrix, csr_matrix)]):
+            raise ValueError("Make sure to input count_matrix as a numpy array or scipy.sparse.csr.csr_matrix. ")
+        else:
+            if count_matrix.shape[0] != embeddings.shape[0]:
+                raise ValueError("Make sure that the count_matrix is a numpy array with shape: "
+                                 "(vector_dim, feature_dim) where vector_dim is the dimensionality "
+                                 "of the vector embeddings and feature_dim is the dimensionality "
+                                 "of the vocabulary. ")
 
 
 def check_is_fitted(topic_model):
