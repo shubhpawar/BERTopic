@@ -3157,7 +3157,7 @@ class BERTopic:
             topic_counts = []
             for topic in self.topics_:
                 topic_rows = []
-                for index in documents[documents['Topic'] == topic]:
+                for index in documents.index[documents['Topic'] == topic]:
                     topic_rows.append(coo_matrix(count_matrix.getrow(index)))
                 topic_matrix = vstack(topic_rows)
                 topic_counts.append(coo_matrix(topic_matrix.sum(axis=0)))
