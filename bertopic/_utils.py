@@ -47,10 +47,11 @@ def check_embeddings_shape(embeddings, docs):
         if not any([isinstance(embeddings, np.ndarray), isinstance(embeddings, csr_matrix)]):
             raise ValueError("Make sure to input embeddings as a numpy array or scipy.sparse.csr.csr_matrix. ")
         else:
-            if embeddings.shape[0] != len(docs):
-                raise ValueError("Make sure that the embeddings are a numpy array with shape: "
-                                 "(len(docs), vector_dim) where vector_dim is the dimensionality "
-                                 "of the vector embeddings. ")
+            if docs is not None:
+                if embeddings.shape[0] != len(docs):
+                    raise ValueError("Make sure that the embeddings are a numpy array with shape: "
+                                    "(len(docs), vector_dim) where vector_dim is the dimensionality "
+                                    "of the vector embeddings. ")
             
 
 def check_count_matrix_shape(count_matrix, embeddings):
