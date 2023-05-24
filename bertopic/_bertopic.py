@@ -3156,9 +3156,11 @@ class BERTopic:
         else:
             topic_counts = []
             topic_indices = documents.groupby(['Topic']).indices
-            for topic in self.topics_:
+            logger.info(f"Number of topics: {len(topic_indices)}")
+            for topic in topic_indices:
+                logger.info(f"Computing count matrix for topic {topic}")
                 topic_matrix = coo_matrix(count_matrix[topic_indices[topic]])
-                topic_counts.append(topic_matrix.sum(axis=0))
+                topic_counts.append(coo_matrix(topic_matrix.sum(axis=0)))
             topic_count_matrix = csr_matrix(vstack(topic_counts))
             self.c_tf_idf_, words = self._c_tf_idf(count_matrix=topic_count_matrix)
         self.topic_representations_ = self._extract_words_per_topic(words, documents)
