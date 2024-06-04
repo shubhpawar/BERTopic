@@ -19,6 +19,8 @@ import scipy.sparse as sp
 from tqdm import tqdm
 from pathlib import Path
 from packaging import version
+from scipy.sparse import vstack
+from scipy.sparse import coo_matrix
 from scipy.sparse import csr_matrix
 from scipy.cluster import hierarchy as sch
 from scipy.spatial.distance import squareform
@@ -52,7 +54,7 @@ from bertopic.dimensionality import BaseDimensionalityReduction
 from bertopic.cluster._utils import hdbscan_delegator, is_supported_hdbscan
 from bertopic._utils import (
     MyLogger, check_documents_type, check_embeddings_shape,
-    check_is_fitted, validate_distance_matrix
+    check_is_fitted, validate_distance_matrix, check_count_matrix_shape
 )
 import bertopic._save_utils as save_utils
 
@@ -299,7 +301,8 @@ class BERTopic:
         return self
 
     def fit_transform(self,
-                      documents: List[str],
+                      documents: List[str] = None,
+                      count_matrix: Union[csr_matrix, np.ndarray] = None,
                       embeddings: np.ndarray = None,
                       y: Union[List[int], np.ndarray] = None) -> Tuple[List[int],
                                                                        Union[np.ndarray, None]]:
@@ -307,6 +310,7 @@ class BERTopic:
 
         Arguments:
             documents: A list of documents to fit on
+            count_matrix: A sparse matrix with shape (n_samples, n_features) that holds the token counts
             embeddings: Pre-trained document embeddings. These can be used
                         instead of the sentence-transformer model
             y: The target class for (semi)-supervised modeling. Use -1 if no class for a
@@ -350,11 +354,19 @@ class BERTopic:
         """
         check_documents_type(documents)
         check_embeddings_shape(embeddings, documents)
+        check_count_matrix_shape(count_matrix, embeddings)
 
-        documents = pd.DataFrame({"Document": documents,
-                                  "ID": range(len(documents)),
-                                  "Topic": None})
-
+        if documents is not None:
+            documents = pd.DataFrame({"Document": documents,
+                                      "ID": range(len(documents)),
+                                      "Topic": None})
+        elif count_matrix is not None:
+            documents = pd.DataFrame({"Document": [""] * count_matrix.shape[0],
+                                      "ID": range(count_matrix.shape[0]),
+                                      "Topic": None})
+        else:
+            raise ValueError("Make sure to either pass a list of documents or a count matrix")
+        
         # Extract embeddings
         if embeddings is None:
             self.embedding_model = select_backend(self.embedding_model,
@@ -381,14 +393,15 @@ class BERTopic:
             documents = self._sort_mappings_by_frequency(documents)
 
         # Extract topics by calculating c-TF-IDF
-        self._extract_topics(documents)
+        self._extract_topics(documents, count_matrix=count_matrix)
 
         # Reduce topics
         if self.nr_topics:
             documents = self._reduce_topics(documents)
 
         # Save the top 3 most representative documents per topic
-        self._save_representative_docs(documents)
+        if count_matrix is None:
+            self._save_representative_docs(documents)
 
         # Resulting output
         self.probabilities_ = self._map_probabilities(probabilities, original_topics=True)
@@ -3126,17 +3139,30 @@ class BERTopic:
             embeddings[indices] = np.average([embeddings[indices], seed_topic_embeddings[seed_topic]], weights=[3, 1])
         return y, embeddings
 
-    def _extract_topics(self, documents: pd.DataFrame):
+    def _extract_topics(self, documents: pd.DataFrame, count_matrix: Union[np.ndarray, csr_matrix] = None):
         """ Extract topics from the clusters using a class-based TF-IDF
 
         Arguments:
-            documents: Dataframe with documents and their corresponding IDs
+            documents: Dataframe with documents and their corresponding IDs. 
+                       All documents are empty strings when count matrix is provided
+            count_matrix: The count matrix of the corpus
 
         Returns:
             c_tf_idf: The resulting matrix giving a value (importance score) for each word per topic
         """
-        documents_per_topic = documents.groupby(['Topic'], as_index=False).agg({'Document': ' '.join})
-        self.c_tf_idf_, words = self._c_tf_idf(documents_per_topic)
+        if count_matrix is None:
+            documents_per_topic = documents.groupby(['Topic'], as_index=False).agg({'Document': ' '.join})
+            self.c_tf_idf_, words = self._c_tf_idf(documents_per_topic=documents_per_topic)
+        else:
+            topic_counts = []
+            topic_indices = documents.groupby(['Topic']).indices
+            logger.info(f"Number of topics: {len(topic_indices)}")
+            for topic in topic_indices:
+                logger.info(f"Computing count matrix for topic {topic}")
+                topic_matrix = coo_matrix(count_matrix[topic_indices[topic]])
+                topic_counts.append(coo_matrix(topic_matrix.sum(axis=0)))
+            topic_count_matrix = csr_matrix(vstack(topic_counts))
+            self.c_tf_idf_, words = self._c_tf_idf(count_matrix=topic_count_matrix)
         self.topic_representations_ = self._extract_words_per_topic(words, documents)
         self._create_topic_vectors()
         self.topic_labels_ = {key: f"{key}_" + "_".join([word[0] for word in values[:4]])
@@ -3265,7 +3291,8 @@ class BERTopic:
             self.topic_embeddings_ = topic_embeddings
 
     def _c_tf_idf(self,
-                  documents_per_topic: pd.DataFrame,
+                  documents_per_topic: pd.DataFrame = None,
+                  count_matrix: Union[csr_matrix, np.ndarray] = None,
                   fit: bool = True,
                   partial_fit: bool = False) -> Tuple[csr_matrix, List[str]]:
         """ Calculate a class-based TF-IDF where m is the number of total documents.
@@ -3273,6 +3300,7 @@ class BERTopic:
         Arguments:
             documents_per_topic: The joined documents per topic such that each topic has a single
                                  string made out of multiple documents
+            count_matrix: The count matrix of the joined documents per topic
             m: The total number of documents (unjoined)
             fit: Whether to fit a new vectorizer or use the fitted self.vectorizer_model
             partial_fit: Whether to run `partial_fit` for online learning
@@ -3281,15 +3309,20 @@ class BERTopic:
             tf_idf: The resulting matrix giving a value (importance score) for each word per topic
             words: The names of the words to which values were given
         """
-        documents = self._preprocess_text(documents_per_topic.Document.values)
+        if documents_per_topic is not None:
+            documents = self._preprocess_text(documents_per_topic.Document.values)
 
-        if partial_fit:
-            X = self.vectorizer_model.partial_fit(documents).update_bow(documents)
-        elif fit:
-            self.vectorizer_model.fit(documents)
-            X = self.vectorizer_model.transform(documents)
+            if partial_fit:
+                X = self.vectorizer_model.partial_fit(documents).update_bow(documents)
+            elif fit:
+                self.vectorizer_model.fit(documents)
+                X = self.vectorizer_model.transform(documents)
+            else:
+                X = self.vectorizer_model.transform(documents)
+        elif count_matrix is not None:
+            X = count_matrix
         else:
-            X = self.vectorizer_model.transform(documents)
+            raise ValueError("Either `documents_per_topic` or `count_matrix` must be specified")
 
         # Scikit-Learn Deprecation: get_feature_names is deprecated in 1.0
         # and will be removed in 1.2. Please use get_feature_names_out instead.

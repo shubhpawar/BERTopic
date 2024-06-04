@@ -32,12 +32,13 @@ class MyLogger:
 
 def check_documents_type(documents):
     """ Check whether the input documents are indeed a list of strings """
-    if isinstance(documents, Iterable) and not isinstance(documents, str):
-        if not any([isinstance(doc, str) for doc in documents]):
-            raise TypeError("Make sure that the iterable only contains strings.")
+    if documents is not None:
+        if isinstance(documents, Iterable) and not isinstance(documents, str):
+            if not any([isinstance(doc, str) for doc in documents]):
+                raise TypeError("Make sure that the iterable only contains strings.")
 
-    else:
-        raise TypeError("Make sure that the documents variable is an iterable containing strings only.")
+        else:
+            raise TypeError("Make sure that the documents variable is an iterable containing strings only.")
 
 
 def check_embeddings_shape(embeddings, docs):
@@ -46,10 +47,24 @@ def check_embeddings_shape(embeddings, docs):
         if not any([isinstance(embeddings, np.ndarray), isinstance(embeddings, csr_matrix)]):
             raise ValueError("Make sure to input embeddings as a numpy array or scipy.sparse.csr.csr_matrix. ")
         else:
-            if embeddings.shape[0] != len(docs):
-                raise ValueError("Make sure that the embeddings are a numpy array with shape: "
-                                 "(len(docs), vector_dim) where vector_dim is the dimensionality "
-                                 "of the vector embeddings. ")
+            if docs is not None:
+                if embeddings.shape[0] != len(docs):
+                    raise ValueError("Make sure that the embeddings are a numpy array with shape: "
+                                    "(len(docs), vector_dim) where vector_dim is the dimensionality "
+                                    "of the vector embeddings. ")
+            
+
+def check_count_matrix_shape(count_matrix, embeddings):
+    """ Check if the count matrix has the correct shape """
+    if count_matrix is not None:
+        if not any([isinstance(count_matrix, np.ndarray), isinstance(count_matrix, csr_matrix)]):
+            raise ValueError("Make sure to input count_matrix as a numpy array or scipy.sparse.csr.csr_matrix. ")
+        else:
+            if count_matrix.shape[0] != embeddings.shape[0]:
+                raise ValueError("Make sure that the count_matrix is a numpy array with shape: "
+                                 "(vector_dim, feature_dim) where vector_dim is the dimensionality "
+                                 "of the vector embeddings and feature_dim is the dimensionality "
+                                 "of the vocabulary. ")
 
 
 def check_is_fitted(topic_model):
